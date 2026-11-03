@@ -10,11 +10,14 @@ st.set_page_config(
     page_title="Online Muhasebe Programı", page_icon="💰", layout="wide"
 )
 
+# Kendi Yönetici E-Posta Adresini buraya yazmalısın:
+ADMIN_EMAIL = "admin@kalkanmuhasebe.com"  # Kendi mail adresinle değiştirebilirsin
+
 # Şifreleri güvenli saklamak için hashleme fonksiyonu
 def hash_sifre(sifre):
     return hashlib.sha256(sifre.encode()).hexdigest()
 
-# Veritabanı ve Tabloları Başlatma (Kullanıcı ve Veri İzolasyonu Destekli)
+# Veritabanı ve Tabloları Başlatma
 def init_db():
     conn = sqlite3.connect("muhasebe.db")
     cursor = conn.cursor()
@@ -28,7 +31,7 @@ def init_db():
         )
     """)
     
-    # Müşteriler Tablosu (user_id eklendi)
+    # Müşteriler Tablosu
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS musteriler (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +45,7 @@ def init_db():
         )
     """)
     
-    # İşlemler Tablosu (user_id eklendi)
+    # İşlemler Tablosu
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS islemler (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,14 +68,14 @@ def get_db():
     conn = sqlite3.connect("muhasebe.db")
     return conn, conn.cursor()
 
-# Oturum Durumu (Session State) Kontrolü
+# Oturum Durumu Kontrolü
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["user_id"] = None
     st.session_state["email"] = None
 
 # ---------------------------------------------------------
-# GİRİŞ / KAYIT EKRANI (Eğer oturum açılmadıysa)
+# GİRİŞ / KAYIT EKRANI
 # ---------------------------------------------------------
 if not st.session_state["logged_in"]:
     st.title("🔐 Online Muhasebe Programı - Giriş")
@@ -121,7 +124,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_in"] = True
                 st.session_state["user_id"] = user[0]
                 st.session_state["email"] = user[1]
-                st.success("Giriş başarılı! Yönlendiriliyorsunuz...")
+                st.success("Giriş başarılı!")
                 st.rerun()
             else:
                 st.error("Hatalı e-posta veya şifre!")
@@ -131,12 +134,17 @@ if not st.session_state["logged_in"]:
 # ---------------------------------------------------------
 else:
     current_user_id = st.session_state["user_id"]
+    current_email = st.session_state["email"]
+    is_admin = (current_email == ADMIN_EMAIL.lower())
     
     # Üst Bilgi ve Çıkış Yap Butonu
     col_baslik, col_cikis = st.columns([5, 1])
     with col_baslik:
         st.title("💰 MUHASEBE PROGRAMI V2.3")
-        st.caption(f"Aktif Hesap: **{st.session_state['email']}**")
+        if is_admin:
+            st.caption(f"Aktif Hesap: **{current_email}** (👑 **YÖNETİCİ**) ")
+        else:
+            st.caption(f"Aktif Hesap: **{current_email}**")
     with col_cikis:
         if st.button("Çıkış Yap"):
             st.session_state["logged_in"] = False
@@ -146,8 +154,11 @@ else:
 
     st.divider()
 
-    # Sekmeler (Tabs)
-    tabs = st.tabs(["İŞLEMLER", "MÜŞTERİ/TEDARİKÇİ", "RAPORLAR"])
+    # Sekmeleri dinamik oluştur (Eğer adminse Yönetici Paneli sekmesini de ekle)
+    if is_admin:
+        tabs = st.tabs(["İŞLEMLER", "MÜŞTERİ/TEDARİKÇİ", "RAPORLAR", "👑 YÖNETİCİ PANELİ"])
+    else:
+        tabs = st.tabs(["İŞLEMLER", "MÜŞTERİ/TEDARİKÇİ", "RAPORLAR"])
 
     # -------------------- İŞLEMLER SEKMESİ --------------------
     with tabs[0]:
@@ -174,7 +185,7 @@ else:
 
         islem_aciklama = st.text_input("AÇIKLAMA", key="islem_aciklama_input").upper()
 
-        if st.button("İŞLEMİ EKLE [F1]"):
+        if st.button("İŞLEMİ EKLE"):
             if not islem_aciklama:
                 st.warning("AÇIKLAMA ALANINI DOLDURUN!")
             elif islem_tutar <= 0:
@@ -201,47 +212,21 @@ else:
         st.divider()
         st.subheader("📋 İşlemler Listesi")
 
-        # Tarih filtreleme alanı
-        f_col1, f_col2, f_col3, f_col4 = st.columns(4)
-        with f_col1:
-            bas_tar = st.date_input("BAŞLANGIÇ", datetime.now(), key="islem_bas_tar")
-        with f_col2:
-            bit_tar = st.date_input("BİTİŞ", datetime.now(), key="islem_bit_tar")
-        with f_col3:
-            st.write("")
-            filtrele_btn = st.button("TARİHE GÖRE ARA")
-        with f_col4:
-            st.write("")
-            tumunu_goster_btn = st.button("TÜM İŞLEMLER")
-
         conn, cursor = get_db()
-        if filtrele_btn:
-            cursor.execute("""
-                SELECT i.id, i.tarih, i.tip, i.aciklama, i.tutar, COALESCE(UPPER(m.ad), '-') 
-                FROM islemler i 
-                LEFT JOIN musteriler m ON i.musteri_id = m.id 
-                WHERE i.user_id = ? AND i.tarih BETWEEN ? AND ?
-                ORDER BY i.tarih ASC, i.id ASC
-            """, (current_user_id, bas_tar.strftime("%Y-%m-%d"), bit_tar.strftime("%Y-%m-%d")))
-        else:
-            # Varsayılan olarak tüm işlemleri veya günlük işlemleri göster
-            cursor.execute("""
-                SELECT i.id, i.tarih, i.tip, i.aciklama, i.tutar, COALESCE(UPPER(m.ad), '-') 
-                FROM islemler i 
-                LEFT JOIN musteriler m ON i.musteri_id = m.id 
-                WHERE i.user_id = ?
-                ORDER BY i.tarih ASC, i.id ASC
-            """, (current_user_id,))
-        
+        cursor.execute("""
+            SELECT i.id, i.tarih, i.tip, i.aciklama, i.tutar, COALESCE(UPPER(m.ad), '-') 
+            FROM islemler i 
+            LEFT JOIN musteriler m ON i.musteri_id = m.id 
+            WHERE i.user_id = ?
+            ORDER BY i.tarih ASC, i.id ASC
+        """, (current_user_id,))
         islem_verileri = cursor.fetchall()
         conn.close()
 
         if islem_verileri:
-            # Bakiye sütununu hesaplayıp ekleyelim
             islem_listesi_tablo = []
             bakiye_takip = 0
             
-            # Önce genel toplam bakiyeyi gösterelim
             conn, cursor = get_db()
             cursor.execute("SELECT COALESCE(SUM(CASE WHEN tip='GELEN' THEN tutar ELSE -tutar END), 0) FROM islemler WHERE user_id = ?", (current_user_id,))
             son_bakiye = cursor.fetchone()[0]
@@ -269,7 +254,6 @@ else:
             df_islemler = pd.DataFrame(islem_listesi_tablo)
             st.dataframe(df_islemler, use_container_width=True)
 
-            # İşlem Silme Bölümü
             st.markdown("---")
             sil_id = st.number_input("Silinecek İşlem ID:", min_value=1, step=1, key="islem_sil_id")
             if st.button("İŞLEMİ SİL"):
@@ -328,7 +312,6 @@ else:
             df_musteriler = pd.DataFrame(musteriler, columns=["ID", "AD", "TİP", "TELEFON", "EMAIL", "ADRES"])
             st.dataframe(df_musteriler, use_container_width=True)
 
-            # Müşteri Silme
             st.markdown("---")
             sil_mus_id = st.number_input("Silinecek Müşteri ID:", min_value=1, step=1, key="mus_sil_id")
             if st.button("MÜŞTERİ SİL"):
@@ -430,3 +413,62 @@ else:
                 st.info("Bu tarih aralığında detay bulunamadı.")
 
         conn.close()
+
+    # -------------------- YÖNETİCİ PANELİ SEKMESİ (Sadece Admin Görebilir) --------------------
+    if is_admin:
+        with tabs[3]:
+            st.subheader("👑 Sistem Yönetici Paneli")
+            st.info("Bu paneli yalnızca sistem yöneticisi (sen) görüntüleyebilir.")
+
+            conn, cursor = get_db()
+            # Toplam kullanıcı sayısı
+            cursor.execute("SELECT COUNT(*) FROM kullanicilar")
+            toplam_kullanici = cursor.fetchone()[0]
+
+            # Toplam işlem sayısı
+            cursor.execute("SELECT COUNT(*) FROM islemler")
+            toplam_islem = cursor.fetchone()[0]
+            conn.close()
+
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                st.metric(label="Toplam Kayıtlı Kullanıcı", value=toplam_kullanici)
+            with sc2:
+                st.metric(label="Sistemdeki Toplam İşlem", value=toplam_islem)
+
+            st.divider()
+            st.subheader("📋 Kayıtlı Tüm Kullanıcılar Listesi")
+
+            conn, cursor = get_db()
+            cursor.execute("SELECT id, email FROM kullanicilar ORDER BY id ASC")
+            tum_kullanicilar = cursor.fetchall()
+            conn.close()
+
+            if tum_kullanicilar:
+                df_kull = pd.DataFrame(tum_kullanicilar, columns=["Kullanıcı ID", "E-Posta Adresi"])
+                st.dataframe(df_kull, use_container_width=True)
+
+                st.markdown("---")
+                st.write("⚠️ **Kullanıcı Yönetimi / Silme**")
+                silinecek_kull_id = st.number_input("Silmek istediğiniz Kullanıcı ID:", min_value=1, step=1, key="admin_sil_kull_id")
+                
+                if st.button("KULLANICIYI VE TÜM VERİLERİNİ SİL"):
+                    if silinecek_kull_id == current_user_id:
+                        st.error("Kendi yönetici hesabınızı bu alandan silemezsiniz!")
+                    else:
+                        conn, cursor = get_db()
+                        # Önce kullanıcının verilerini, müşterilerini ve hesabını silelim
+                        cursor.execute("DELETE FROM islemler WHERE user_id = ?", (silinecek_kull_id,))
+                        cursor.execute("DELETE FROM musteriler WHERE user_id = ?", (silinecek_kull_id,))
+                        cursor.execute("DELETE FROM kullanicilar WHERE id = ?", (silinecek_kull_id,))
+                        
+                        if cursor.rowcount > 0:
+                            conn.commit()
+                            conn.close()
+                            st.success(f"{silinecek_kull_id} ID'li kullanıcı ve tüm verileri tamamen silindi!")
+                            st.rerun()
+                        else:
+                            conn.close()
+                            st.error("Bu ID'ye ait kullanıcı bulunamadı.")
+            else:
+                st.info("Sistemde henüz kayıtlı kullanıcı yok.")
